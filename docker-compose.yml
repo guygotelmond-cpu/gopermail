@@ -1,0 +1,92 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: smtp_postgres
+    environment:
+      POSTGRES_USER: smtp_user
+      POSTGRES_PASSWORD: smtp_password
+      POSTGRES_DB: smtp_metadata
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  mongodb:
+    image: mongo:6.0
+    container_name: smtp_mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodata:/data/db
+
+  # Mail ingestion service — accepts SMTP traffic, evaluates rules, persists.
+  smtpd:
+    build:
+      context: .
+      dockerfile: Dockerfile.smtpd
+    container_name: gomail_smtpd
+    depends_on:
+      - postgres
+      - mongodb
+    environment:
+      POSTGRES_DSN: "postgres://smtp_user:smtp_password@postgres:5432/smtp_metadata?sslmode=disable"
+      MONGO_URI: "mongodb://mongodb:27017"
+      SMTP_ADDR: "0.0.0.0:1025"
+      SMTP_DOMAIN: "localhost"
+    ports:
+      - "1025:1025"
+
+  # gRPC control-plane — rule mutation, machine-to-machine facing.
+  controld:
+    build:
+      context: .
+      dockerfile: Dockerfile.controld
+    container_name: gomail_controld
+    depends_on:
+      - postgres
+    environment:
+      POSTGRES_DSN: "postgres://smtp_user:smtp_password@postgres:5432/smtp_metadata?sslmode=disable"
+      CONTROL_GRPC_ADDR: "0.0.0.0:9090"
+    ports:
+      - "9090:9090"
+
+  # REST gateway for the frontend — reads Postgres directly, proxies rule
+  # writes to controld over gRPC.
+  apiserver:
+    build:
+      context: .
+      dockerfile: Dockerfile.apiserver
+    container_name: gomail_apiserver
+    depends_on:
+      - postgres
+      - mongodb
+      - controld
+      - smtpd
+    environment:
+      POSTGRES_DSN: "postgres://smtp_user:smtp_password@postgres:5432/smtp_metadata?sslmode=disable"
+      MONGO_URI: "mongodb://mongodb:27017"
+      CONTROL_GRPC_ADDR: "controld:9090"
+      SMTP_ADDR: "smtpd:1025"
+      API_ADDR: "0.0.0.0:8080"
+      CORS_ALLOW_ORIGIN: "http://localhost:5173"
+    ports:
+      - "8080:8080"
+
+  # React frontend, built and served by nginx.
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: "http://localhost:8080"
+    container_name: gomail_web
+    depends_on:
+      - apiserver
+    ports:
+      - "5173:80"
+
+volumes:
+  pgdata:
+  mongodata:

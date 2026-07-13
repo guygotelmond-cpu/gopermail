@@ -1,0 +1,33 @@
+# --- Go ---
+/cmd/smtpd/smtpd
+/cmd/controld/controld
+/cmd/apiserver/apiserver
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+/bin/
+/dist/
+
+# --- Node / Vite (web/) ---
+web/node_modules/
+web/dist/
+web/.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# --- Env / secrets ---
+.env
+.env.*
+!.env.example
+
+# --- Docker / IDE / OS ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

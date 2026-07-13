@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package control;
+
+option go_package = "proto/control";
+
+service RuleService {
+  rpc AddRule (AddRuleRequest) returns (AddRuleResponse);
+}
+
+message Rule {
+  string field = 1;        // 'sender', 'subject', 'body'
+  string operator = 2;     // 'contains', 'equals'
+  string value = 3;        // Content string to evaluate
+  string action = 4;       // 'move_to', 'mark_spam', 'delete'
+  string action_value = 5; // Optional target folder
+}
+
+message AddRuleRequest {
+  string username = 1;
+  Rule rule = 2;
+}
+
+message AddRuleResponse {
+  bool success = 1;
+  string message = 2;
+}
