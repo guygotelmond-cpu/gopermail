@@ -12,6 +12,12 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U smtp_user -d smtp_metadata"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
   mongodb:
     image: mongo:6.0
@@ -20,6 +26,12 @@ services:
       - "27017:27017"
     volumes:
       - mongodata:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
 
   # Mail ingestion service — accepts SMTP traffic, evaluates rules, persists.
   smtpd:
@@ -28,8 +40,10 @@ services:
       dockerfile: Dockerfile.smtpd
     container_name: gomail_smtpd
     depends_on:
-      - postgres
-      - mongodb
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
     environment:
       POSTGRES_DSN: "postgres://smtp_user:smtp_password@postgres:5432/smtp_metadata?sslmode=disable"
       MONGO_URI: "mongodb://mongodb:27017"
@@ -45,7 +59,8 @@ services:
       dockerfile: Dockerfile.controld
     container_name: gomail_controld
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     environment:
       POSTGRES_DSN: "postgres://smtp_user:smtp_password@postgres:5432/smtp_metadata?sslmode=disable"
       CONTROL_GRPC_ADDR: "0.0.0.0:9090"
@@ -53,39 +68,49 @@ services:
       - "9090:9090"
 
   # REST gateway for the frontend — reads Postgres directly, proxies rule
-  # writes to controld over gRPC.
+  # writes to controld over gRPC. TLS terminated by nginx; runs plain HTTP internally.
   apiserver:
     build:
       context: .
       dockerfile: Dockerfile.apiserver
     container_name: gomail_apiserver
     depends_on:
-      - postgres
-      - mongodb
-      - controld
-      - smtpd
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      controld:
+        condition: service_started
+      smtpd:
+        condition: service_started
     environment:
       POSTGRES_DSN: "postgres://smtp_user:smtp_password@postgres:5432/smtp_metadata?sslmode=disable"
       MONGO_URI: "mongodb://mongodb:27017"
       CONTROL_GRPC_ADDR: "controld:9090"
       SMTP_ADDR: "smtpd:1025"
       API_ADDR: "0.0.0.0:8080"
-      CORS_ALLOW_ORIGIN: "http://localhost:5173"
-    ports:
-      - "8080:8080"
+      # Nginx proxies /api/ from the same origin — CORS not needed inside docker.
+      CORS_ALLOW_ORIGIN: "*"
+    # Port 8080 is internal only; nginx exposes it via 443.
 
-  # React frontend, built and served by nginx.
+  # React frontend served by nginx with HTTPS.
+  # nginx also reverse-proxies /api/ → apiserver:8080 so the browser
+  # hits a single origin (https://localhost) with no CORS overhead.
   web:
     build:
       context: ./web
       dockerfile: Dockerfile
       args:
-        VITE_API_URL: "http://localhost:8080"
+        # Empty → relative /api/ URLs; nginx handles the proxy.
+        VITE_API_URL: ""
     container_name: gomail_web
     depends_on:
       - apiserver
     ports:
-      - "5173:80"
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./certs:/etc/nginx/certs:ro
 
 volumes:
   pgdata:
