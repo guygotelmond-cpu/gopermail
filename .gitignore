@@ -2,6 +2,7 @@
 /cmd/smtpd/smtpd
 /cmd/controld/controld
 /cmd/apiserver/apiserver
+/apiserver
 *.exe
 *.exe~
 *.dll
@@ -24,6 +25,10 @@ yarn-error.log*
 .env
 .env.*
 !.env.example
+
+# --- TLS certs (private key must never be committed) ---
+certs/server.key
+certs/server.crt
 
 # --- Docker / IDE / OS ---
 .DS_Store
